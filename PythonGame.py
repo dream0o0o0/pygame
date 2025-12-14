@@ -1,6 +1,12 @@
 import tkinter as tk
 import random
 
+import os
+from pathlib import Path
+
+os.chdir(Path(__file__).resolve().parent)  # 현재디렉토리를 스크립트 폴더로 고정
+print("CWD =", os.getcwd())
+
 W, H = 600, 800
 
 root = tk.Tk()
