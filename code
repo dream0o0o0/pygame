@@ -1,0 +1,242 @@
+import tkinter as tk
+import random
+
+W, H = 600, 800
+
+root = tk.Tk()
+root.title("Shooting Game")
+cv = tk.Canvas(root, width=W, height=H, bg="black", highlightthickness=0)
+cv.pack()
+
+# 사운드
+sound_ok = False
+try:
+    import pygame
+    pygame.mixer.init()
+    snd = pygame.mixer.Sound("destroy.mp3")
+    snd.set_volume(0.4)
+    sound_ok = True
+except:
+    snd = None
+
+# 배경 (고정)
+random.seed(12345)
+for _ in range(15):
+    x, y = random.randint(10, W-10), random.randint(10, H-10)
+    g = random.randint(60, 130)
+    cv.create_oval(x, y, x+2, y+2, fill=f"#{g:02x}{g:02x}{g:02x}", outline="")
+random.seed()
+
+# 플레이어
+try:
+    pimg = tk.PhotoImage(file="spaceship.png").subsample(10, 10)
+    player = cv.create_image(W//2, H-50, image=pimg)
+except:
+    player = cv.create_polygon(W//2, H-70, W//2-20, H-30, W//2+20, H-30, fill="lime")
+
+# 운석 이미지 로드
+try:
+    meteor_red_img = tk.PhotoImage(file="meteor_red.png").subsample(3, 3)
+    meteor_blue_img = tk.PhotoImage(file="meteor_blue.png").subsample(2, 2)
+    use_meteor_img = True
+except:
+    use_meteor_img = False
+
+# 풀 생성
+BMAX, EMAX, IMAX = 10, 8, 3
+bpool = [{"id": cv.create_line(0,-100,0,-80,fill="yellow",width=3,state="hidden"), "x":0.0, "y":-100.0} for _ in range(BMAX)]
+
+# 운석 풀 (이미지 또는 사각형)
+epool = []
+for _ in range(EMAX):
+    if use_meteor_img:
+        eid = cv.create_image(-100, -100, image=meteor_red_img, state="hidden")
+    else:
+        eid = cv.create_rectangle(-100,-100,-60,-60,fill="red",outline="",state="hidden")
+    epool.append({"id": eid, "x":0.0, "y":-100.0, "hp":0, "blue":False})
+
+ipool = [{"id": cv.create_oval(-50,-50,-30,-30,fill="cyan",outline="",state="hidden"), "x":0.0, "y":-100.0} for _ in range(IMAX)]
+
+# 활성 리스트 (이것만 업데이트)
+active_b = []
+active_e = []
+active_i = []
+
+# 상태
+px, score, lives, shield, level, kills, espeed = W//2, 0, 3, 0, 1, 0, 2.0
+running = True
+kL, kR = False, False
+
+# UI
+ui_s = cv.create_text(10, 10, anchor="nw", text="0", fill="white", font=("Arial", 14, "bold"))
+ui_l = cv.create_text(W-10, 10, anchor="ne", text="♥♥♥", fill="red", font=("Arial", 16))
+ui_sh = [cv.create_rectangle(W-110+i*20, 35, W-95+i*20, 50, fill="#333", outline="#555") for i in range(5)]
+last_shield = -1
+
+def upd_ui():
+    global last_shield
+    cv.itemconfig(ui_s, text=str(score))
+    cv.itemconfig(ui_l, text="♥"*lives + "♡"*(3-lives))
+    if shield != last_shield:
+        for i in range(5):
+            cv.itemconfig(ui_sh[i], fill="cyan" if i < shield else "#333")
+        last_shield = shield
+
+# 입력
+def kdn(e):
+    global kL, kR
+    if e.keysym == "Left": kL = True
+    elif e.keysym == "Right": kR = True
+    elif e.keysym == "r" and not running: restart()
+def kup(e):
+    global kL, kR
+    if e.keysym == "Left": kL = False
+    elif e.keysym == "Right": kR = False
+def fire(e):
+    if not running: return
+    for b in bpool:
+        if b not in active_b:
+            b["x"], b["y"] = px, H-75
+            cv.coords(b["id"], px, H-75, px, H-55)
+            cv.itemconfig(b["id"], state="normal")
+            active_b.append(b)
+            return
+root.bind("<KeyPress>", kdn)
+root.bind("<KeyRelease>", kup)
+root.bind("<space>", fire)
+
+# 적 생성
+def spawn():
+    if not running: return
+    if len(active_e) < 4 + level//2:
+        for en in epool:
+            if en not in active_e:
+                x = random.randint(40, W-75)
+                blue = random.random() < 0.2
+                en["x"], en["y"], en["hp"], en["blue"] = x, -35, (3 if blue else 1), blue
+                if use_meteor_img:
+                    cv.coords(en["id"], x+17, -17)  # 이미지는 중심 좌표
+                    cv.itemconfig(en["id"], image=meteor_blue_img if blue else meteor_red_img, state="normal")
+                else:
+                    cv.coords(en["id"], x, -35, x+35, 0)
+                    cv.itemconfig(en["id"], fill="#48f" if blue else "#f44", state="normal")
+                active_e.append(en)
+                break
+    root.after(max(350, 1100 - level*45), spawn)
+
+def show_lv(lv):
+    t = cv.create_text(W//2, H//2, text=f"{lv}단계", fill="white", font=("Arial", 22, "bold"))
+    root.after(1000, lambda: cv.delete(t))
+
+# 메인 루프
+def loop():
+    global px, score, lives, shield, level, kills, espeed, running
+    if not running: return
+    
+    # 이동
+    if kL and px > 35: px -= 10
+    if kR and px < W-35: px += 10
+    cv.coords(player, px, H-50)
+    
+    # 총알 (활성만)
+    rm_b = []
+    for b in active_b:
+        b["y"] -= 18
+        if b["y"] < 0:
+            cv.itemconfig(b["id"], state="hidden")
+            rm_b.append(b)
+        else:
+            cv.coords(b["id"], int(b["x"]), int(b["y"]), int(b["x"]), int(b["y"])+20)
+    for b in rm_b: active_b.remove(b)
+    
+    # 적 (활성만)
+    rm_e = []
+    for en in active_e:
+        en["y"] += espeed
+        if en["y"] > H-35:
+            gameover(); return
+        
+        if use_meteor_img:
+            cv.coords(en["id"], int(en["x"])+17, int(en["y"])+17)
+        else:
+            cv.coords(en["id"], int(en["x"]), int(en["y"]), int(en["x"])+35, int(en["y"])+35)
+        
+        # 총알 충돌 (활성만)
+        for b in active_b:
+            if en["x"] < b["x"] < en["x"]+35 and en["y"] < b["y"] < en["y"]+35:
+                cv.itemconfig(b["id"], state="hidden")
+                active_b.remove(b)
+                en["hp"] -= 1
+                if en["hp"] <= 0:
+                    if sound_ok: snd.play()
+                    cv.itemconfig(en["id"], state="hidden")
+                    rm_e.append(en)
+                    score += 10 if en["blue"] else 5
+                    if en["blue"]:
+                        for it in ipool:
+                            if it not in active_i:
+                                it["x"], it["y"] = en["x"]+10, en["y"]
+                                cv.coords(it["id"], int(it["x"]), int(it["y"]), int(it["x"])+15, int(it["y"])+15)
+                                cv.itemconfig(it["id"], state="normal")
+                                active_i.append(it)
+                                break
+                    kills += 1
+                    if kills >= 5:
+                        kills = 0; level += 1; espeed = min(5, espeed+0.15)
+                        show_lv(level)
+                    upd_ui()
+                break
+        
+        if en in rm_e: continue
+        
+        # 플레이어 충돌
+        if en["x"] < px+25 and en["x"]+35 > px-25 and en["y"]+35 > H-75:
+            cv.itemconfig(en["id"], state="hidden")
+            rm_e.append(en)
+            if shield > 0: shield -= 1
+            else:
+                lives -= 1
+                if lives <= 0: gameover(); return
+            upd_ui()
+    
+    for en in rm_e: active_e.remove(en)
+    
+    # 아이템 (활성만)
+    rm_i = []
+    for it in active_i:
+        it["y"] += 2
+        if it["y"] > H:
+            cv.itemconfig(it["id"], state="hidden")
+            rm_i.append(it)
+        else:
+            cv.coords(it["id"], int(it["x"]), int(it["y"]), int(it["x"])+15, int(it["y"])+15)
+            if it["x"] < px+25 and it["x"]+15 > px-25 and it["y"]+15 > H-75:
+                cv.itemconfig(it["id"], state="hidden")
+                rm_i.append(it)
+                if shield < 5: shield += 1; upd_ui()
+    for it in rm_i: active_i.remove(it)
+    
+    root.after(33, loop)
+
+def gameover():
+    global running
+    running = False
+    cv.create_rectangle(W//2-115, H//2-55, W//2+115, H//2+55, fill="#111", outline="red", width=2, tags="go")
+    cv.create_text(W//2, H//2-25, text="GAME OVER", fill="red", font=("Arial", 26, "bold"), tags="go")
+    cv.create_text(W//2, H//2+5, text=f"Score: {score}", fill="white", font=("Arial", 16), tags="go")
+    cv.create_text(W//2, H//2+35, text="[ R ] 재시작", fill="#888", font=("Arial", 12), tags="go")
+
+def restart():
+    global px, score, lives, shield, level, kills, espeed, running, last_shield
+    cv.delete("go")
+    for b in active_b: cv.itemconfig(b["id"], state="hidden")
+    for en in active_e: cv.itemconfig(en["id"], state="hidden")
+    for it in active_i: cv.itemconfig(it["id"], state="hidden")
+    active_b.clear(); active_e.clear(); active_i.clear()
+    px, score, lives, shield, level, kills, espeed = W//2, 0, 3, 0, 1, 0, 2.0
+    running = True; last_shield = -1
+    cv.coords(player, px, H-50)
+    upd_ui(); show_lv(1); spawn(); loop()
+
+upd_ui(); show_lv(1); spawn(); loop()
+root.mainloop()
