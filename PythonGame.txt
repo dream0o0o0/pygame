@@ -1,0 +1,294 @@
+import tkinter as tk
+import random
+
+root = tk.Tk()
+root.title("Tkinter Shooting Game")
+
+WIDTH = 600
+HEIGHT = 800
+
+canvas = tk.Canvas(root, width=WIDTH, height=HEIGHT, bg="black")
+canvas.pack()
+root.focus_set()
+
+# ---------- 별 배경 ----------
+stars = []
+for _ in range(100):
+    x = random.randint(0, WIDTH)
+    y = random.randint(0, HEIGHT)
+    canvas.create_oval(x, y, x+2, y+2, fill="white")
+
+def twinkle_stars():
+    for star in stars:
+        shade = random.randint(150, 255)
+        color = f'#{shade:02x}{shade:02x}{shade:02x}'
+        canvas.itemconfig(star, fill=color)
+    root.after(200, twinkle_stars)
+
+twinkle_stars()
+
+# ---------- 플레이어 이미지 ----------
+player_img = tk.PhotoImage(file="spaceship.png")  # 미리 50x50 크기로 준비
+player = canvas.create_image(300, 760, image=player_img)
+
+
+
+# 플레이어
+PLAYER_SPEED = 10
+left_pressed = False
+right_pressed = False
+
+# 게임 변수
+bullets = []
+enemies = []
+enemy_hp = {}   # 적 체력 저장
+
+enemy_speed = 1.5     # ⭐ 적 내려오는 속도
+MAX_ENEMIES = 5       # ⭐ 화면에 존재 가능한 적 수
+
+kill_count = 0      # ⭐ 없앤 적 수
+level = 1           # ⭐ 현재 단계
+
+# 점수
+score = 0
+score_text = None
+level_text = None
+
+KILLS_PER_LEVEL = 5
+SPEED_UP = 0.5
+game_over = False 
+
+# 키 이벤트
+def key_down(event):
+    global left_pressed, right_pressed
+
+    if event.keysym == "Left":
+        left_pressed = True
+        return "break"
+    elif event.keysym == "Right":
+        right_pressed = True
+        return "break"
+
+def key_up(event):
+    global left_pressed, right_pressed
+    if event.keysym == "Left":
+        left_pressed = False
+        return "break"
+    elif event.keysym == "Right":
+        right_pressed = False
+        return "break"
+
+# 난이도 증가
+def increase_difficulty():
+       global kill_count, level, enemy_speed
+                    
+       kill_count += 1
+                    
+       if kill_count % KILLS_PER_LEVEL == 0:
+           level += 1
+           enemy_speed += SPEED_UP
+           show_level_text()
+
+# 레벨 표시
+def show_level_text():
+    global level_text
+
+    # 기존 텍스트 있으면 삭제
+    if level_text is not None:
+        canvas.delete(level_text)
+
+    level_text = canvas.create_text(
+        300, 300,
+        text=f"{level}단계",
+        fill="white",
+        font=("Arial", 24, "bold")
+    )
+
+    # 1.5초 후 텍스트 제거
+    root.after(1500, lambda: canvas.delete(level_text))
+
+
+def move_left(event):
+    x1, y1, x2, y2 = canvas.coords(player)
+    if x1 > 0:
+        canvas.move(player, -35, 0)
+
+def move_right(event):
+    x1, y1, x2, y2 = canvas.coords(player)
+    if x2 < 600:
+        canvas.move(player, 35, 0)
+
+# 게임 종료
+def end_game():
+    global game_over
+
+    if game_over:
+        return   # ⭐ 중복 호출 방지
+
+    game_over = True
+    show_game_over()   # ⭐ 여기!!!
+
+def show_game_over():
+    global score
+    canvas.create_text(
+        WIDTH // 2,
+        HEIGHT // 2 - 30,
+        text="GAME OVER",
+        fill="red",
+        font=("Arial", 36, "bold")
+    )
+
+    canvas.create_text(
+        WIDTH // 2,
+        HEIGHT // 2 + 20,
+        text=f"Final Score: {score}",
+        fill="white",
+        font=("Arial", 24, "bold")
+    )
+
+# 이미지 적 생성
+def spawn_enemy():
+    if game_over:
+        return
+
+    if len(enemies) < MAX_ENEMIES:
+        x = random.randint(0, WIDTH-40)
+      
+        if random.random() < 0.2:   # 파란 적
+            enemy = canvas.create_rectangle(x, 0, x+40, 40, fill="blue")
+            enemy_hp[enemy] = 3
+        else:                       # 빨간 적
+            enemy = canvas.create_rectangle(x, 0, x+40, 40, fill="red")
+            enemy_hp[enemy] = 1     # ⭐ 이것 빠지면 바로 오류남
+
+        enemies.append(enemy)
+
+    root.after(1500, spawn_enemy)  # ⭐ 1.5초마다 생성
+
+# 총알
+def fire_bullet(event):
+    x1, y1, x2, y2 = canvas.coords(player)
+    bullet = canvas.create_rectangle((x1+x2)//2 - 2, y1 - 10,
+                                     (x1+x2)//2 + 2, y1 - 2, fill="yellow")
+    bullets.append(bullet)
+
+# 업데이트 함수
+def update_bullets():
+    for b in bullets[:]:
+        canvas.move(b, 0, -15)
+        if canvas.coords(b)[1] < 0:
+            canvas.delete(b)
+            bullets.remove(b)
+
+def update_enemies():
+    for e in enemies[:]:
+        canvas.move(e, 0, enemy_speed)
+
+        x1, y1, x2, y2 = canvas.bbox(e)
+
+        # ⭐ 적이 바닥에 닿았을 때
+        if y2 >= HEIGHT:
+            if e in enemy_hp:        # ⭐ 체력 정보 삭제
+                del enemy_hp[e]
+            end_game()
+            return
+
+        # 바닥에 닿으면 게임 오버
+        if canvas.coords(e)[3] >= 800:
+            end_game()
+            return
+
+def update_score():
+    global score_text
+
+    if score_text is not None:
+        canvas.delete(score_text)
+
+    score_text = canvas.create_text(
+        10, 10,
+        anchor="nw",           # 왼쪽 상단 기준
+        text=f"Score: {score}",
+        fill="white",
+        font=("Arial", 16, "bold")
+    )
+
+# 충돌
+def is_collide(a, b):
+    ax1, ay1, ax2, ay2 = canvas.bbox(a)
+    bx1, by1, bx2, by2 = canvas.bbox(b)
+    return ax1 < bx2 and ax2 > bx1 and ay1 < by2 and ay2 > by1
+
+def check_collisions():
+    global score
+
+    # 총알 ↔ 적
+    for e in enemies[:]:
+        for b in bullets[:]:
+            if is_collide(e, b):
+                # 총알 제거
+                canvas.delete(b)
+                bullets.remove(b)
+
+                if e not in enemy_hp:
+                    continue
+
+                # ⭐ 적 체력 감소
+                enemy_hp[e] -= 1
+
+                # ⭐ 체력 0이면 적 제거
+                if enemy_hp[e] <= 0:
+                    canvas.delete(e)
+                    enemies.remove(e)
+                    del enemy_hp[e]
+
+                    # ⭐ 점수 처리
+                    if not game_over:
+                        if canvas.itemcget(e, "fill") == "blue":
+                            score += 10
+                        else:
+                            score += 5
+                        update_score()
+
+                    increase_difficulty()
+
+                break
+
+    # 플레이어 ↔ 적 (게임오버)
+    for e in enemies:
+        if is_collide(player, e):
+            end_game()
+            break
+
+# 게임 루프
+def game_loop():
+    if game_over:
+        return
+
+    x, y = canvas.coords(player)
+
+    if left_pressed:
+        new_x = max(25, x - PLAYER_SPEED)
+        canvas.move(player, new_x, y)
+
+    if right_pressed:
+        new_x = min(WIDTH - (WIDTH - 25), x + PLAYER_SPEED)
+        canvas.move(player, new_x - x, y)
+
+    update_bullets()
+    update_enemies()
+    check_collisions()
+
+    root.after(20, game_loop)
+
+# 이벤트 바인딩
+root.bind("<KeyPress>", key_down)
+root.bind("<KeyRelease>", key_up)
+root.bind("<space>", fire_bullet)
+
+# 시작
+show_level_text()
+update_score()
+spawn_enemy()
+game_loop()
+
+root.mainloop()
